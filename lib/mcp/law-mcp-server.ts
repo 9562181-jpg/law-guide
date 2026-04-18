@@ -4,6 +4,7 @@ import {
   fetchLawArticle,
   fetchLawsForIncident,
   formatLawContext,
+  searchArticlesInLaw,
 } from "../law-api";
 import { LAW_MAP } from "../law-map";
 import type { IncidentType, ParsedArticle } from "../types";
@@ -80,7 +81,10 @@ export function registerLawTools(server: McpServer): void {
           content: [
             {
               type: "text",
-              text: `[법령 조회 실패 — ${incidentType}] 직접 확인 필요.`,
+              text:
+                `[법령 조회 실패 — ${incidentType}] ` +
+                `search_articles_in_law(lawName, keyword) 또는 ` +
+                `get_law_article(lawName, articleNumber)로 직접 조회하라.`,
             },
           ],
           isError: true,
@@ -127,11 +131,50 @@ export function registerLawTools(server: McpServer): void {
   );
 
   server.registerTool(
+    "search_articles_in_law",
+    {
+      title: "법령 내 조문 키워드 검색",
+      description:
+        "법령명 + 키워드로 해당 법령 내 조문을 검색한다. 매핑되지 않은 사안(예: 주취자 보호, 업무방해, 거짓신고 등)의 법적 근거를 찾을 때 사용한다. list_incident_types로 매핑이 없으면 이 도구 또는 get_law_article로 원문을 직접 조회하라.",
+      inputSchema: {
+        lawName: z
+          .string()
+          .describe("공식 법령명 (예: '형법', '경범죄 처벌법', '경찰관 직무집행법')"),
+        keyword: z
+          .string()
+          .describe("조문 제목·내용에서 검색할 키워드 (예: '업무방해', '거짓신고', '보호조치')"),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(20)
+          .default(5)
+          .describe("반환할 최대 조문 수"),
+      },
+    },
+    async ({ lawName, keyword, limit }) => {
+      const articles = await searchArticlesInLaw(lawName, keyword, limit);
+      if (articles.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `[법령 조회 실패 — ${lawName}에서 '${keyword}' 매칭 없음] 직접 확인 필요.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      return { content: [{ type: "text", text: formatLawContext(articles) }] };
+    }
+  );
+
+  server.registerTool(
     "search_law_keyword",
     {
-      title: "법령 키워드 검색",
+      title: "법령 키워드 검색 (매핑 테이블)",
       description:
-        "LAW_MAP에 매핑된 법령 목록에서 키워드로 법령명을 찾는다. 정확한 법령명을 모를 때 사용한다.",
+        "LAW_MAP에 매핑된 법령 목록에서 키워드로 법령명을 찾는다. 정확한 법령명을 모를 때 사용한다. 법령 내 조문 검색이 필요하면 search_articles_in_law를 사용하라.",
       inputSchema: {
         keyword: z.string().describe("검색할 키워드 (예: '스토킹', '가정폭력')"),
       },

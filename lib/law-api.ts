@@ -234,6 +234,108 @@ export async function fetchLawsForIncident(
 }
 
 /**
+ * 법령 내 조문 제목·내용에 키워드가 포함된 조문을 검색한다.
+ * 매핑되지 않은 사안의 법적 근거를 찾을 때 사용한다.
+ */
+export async function searchArticlesInLaw(
+  lawName: string,
+  keyword: string,
+  limit = 5
+): Promise<ParsedArticle[]> {
+  const cacheKey = `search:${lawName}:${keyword}:${limit}`;
+  const cached = cache.get(cacheKey);
+  if (cached && cached.expiry > Date.now()) return cached.data;
+
+  const xml = await fetchLawXml(lawName);
+  if (!xml) return [];
+
+  try {
+    const parsed = xmlParser.parse(xml);
+    const law = parsed?.법령 || parsed?.LawService?.법령 || parsed?.law;
+    const articlesNode = law?.조문?.조문단위;
+    if (!articlesNode) return [];
+
+    const articles = Array.isArray(articlesNode) ? articlesNode : [articlesNode];
+    const matched: ParsedArticle[] = [];
+    const kw = keyword.trim();
+    if (!kw) return [];
+
+    for (const article of articles) {
+      if (article?.조문여부 === "전문") continue;
+      if (matched.length >= limit) break;
+
+      const title = String(article?.조문제목 ?? "");
+      const content = String(article?.조문내용 ?? "");
+      const paragraphText = Array.isArray(article?.항)
+        ? article.항
+            .map((p: Record<string, unknown>) => {
+              const paraText = String(p?.항내용 ?? "");
+              const hoText = Array.isArray(p?.호)
+                ? (p.호 as Record<string, unknown>[])
+                    .map((h) => String(h?.호내용 ?? ""))
+                    .join(" ")
+                : "";
+              return `${paraText} ${hoText}`;
+            })
+            .join(" ")
+        : "";
+
+      if (
+        !title.includes(kw) &&
+        !content.includes(kw) &&
+        !paragraphText.includes(kw)
+      ) {
+        continue;
+      }
+
+      const articleNum = article?.조문번호;
+      const branchNum = article?.조문가지번호;
+      if (articleNum === undefined || articleNum === null || articleNum === "") continue;
+      const baseNum = String(articleNum).replace(/[^\d]/g, "");
+      const articleKey = branchNum
+        ? `제${baseNum}조의${String(branchNum).replace(/[^\d]/g, "")}`
+        : `제${baseNum}조`;
+
+      const parsedArticle: ParsedArticle = {
+        lawName,
+        articleNumber: articleKey,
+        articleTitle: title,
+        content,
+      };
+
+      if (article?.항) {
+        const paragraphs = Array.isArray(article.항) ? article.항 : [article.항];
+        parsedArticle.paragraphs = paragraphs.map(
+          (p: Record<string, unknown>, idx: number) => ({
+            number: idx + 1,
+            content: (p?.항내용 as string) || "",
+            subparagraphs: Array.isArray(p?.호)
+              ? (p.호 as Record<string, unknown>[]).map((h, hIdx) => ({
+                  number: hIdx + 1,
+                  content: (h?.호내용 as string) || "",
+                }))
+              : undefined,
+          })
+        );
+      }
+
+      matched.push(parsedArticle);
+    }
+
+    if (matched.length > 0) {
+      cache.set(cacheKey, { data: matched, expiry: Date.now() + CACHE_TTL_MS });
+    }
+    return matched;
+  } catch (err) {
+    console.warn(
+      `[law-api] 키워드 검색 실패 (${lawName}/${keyword}):`,
+      err instanceof Error ? err.message : err
+    );
+    return [];
+  }
+}
+
+/**
  * 단일 법령의 특정 조문을 조회한다.
  */
 export async function fetchLawArticle(
