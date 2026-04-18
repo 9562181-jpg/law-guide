@@ -32,7 +32,7 @@ async function fetchLawXml(lawName: string): Promise<string | null> {
       url.searchParams.set("target", "law");
       url.searchParams.set("type", "XML");
       url.searchParams.set("query", lawName);
-      url.searchParams.set("display", "1");
+      url.searchParams.set("display", "20");
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -48,7 +48,12 @@ async function fetchLawXml(lawName: string): Promise<string | null> {
       const laws = searchParsed?.LawSearch?.law;
       if (!laws) throw new Error("검색 결과 없음");
 
-      const lawData = Array.isArray(laws) ? laws[0] : laws;
+      const lawArray = Array.isArray(laws) ? laws : [laws];
+      const exactMatch = lawArray.find((l: Record<string, unknown>) => {
+        const name = l?.법령명한글 ?? l?.LawNameKorean;
+        return typeof name === "string" && name === lawName;
+      });
+      const lawData = exactMatch ?? lawArray[0];
       const mst = lawData?.법령일련번호 || lawData?.MST;
 
       if (!mst) throw new Error("법령 ID 추출 실패");
