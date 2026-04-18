@@ -26,12 +26,6 @@ const authed = withMcpAuth(
   handler,
   async (_req, bearerToken) => {
     const expected = process.env.MCP_AUTH_TOKEN;
-    // TEMP DEBUG: 민감값 노출 없이 존재·길이·일치만 로그
-    console.log(
-      `[MCP Auth] env.MCP_AUTH_TOKEN=${expected ? `set(len=${expected.length})` : "MISSING"} ` +
-        `bearer=${bearerToken ? `set(len=${bearerToken.length})` : "MISSING"} ` +
-        `match=${bearerToken === expected}`
-    );
     if (!expected || !bearerToken) return undefined;
     if (bearerToken !== expected) return undefined;
     return {
