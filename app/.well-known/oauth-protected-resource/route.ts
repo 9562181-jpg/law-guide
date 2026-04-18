@@ -5,9 +5,10 @@ import {
 
 export const runtime = "nodejs";
 
-const AUTHKIT_DOMAIN = process.env.WORKOS_AUTHKIT_DOMAIN;
-const MCP_RESOURCE_URL =
-  process.env.MCP_RESOURCE_URL ?? "https://law-guide-ten.vercel.app/api/mcp/mcp";
+const AUTHKIT_DOMAIN = process.env.WORKOS_AUTHKIT_DOMAIN?.trim();
+const MCP_RESOURCE_URL = (
+  process.env.MCP_RESOURCE_URL ?? "https://law-guide-ten.vercel.app/api/mcp/mcp"
+).trim();
 
 if (!AUTHKIT_DOMAIN) {
   throw new Error("WORKOS_AUTHKIT_DOMAIN env var is required");
