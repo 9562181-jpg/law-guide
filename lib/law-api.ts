@@ -5,7 +5,7 @@ import { LAW_MAP } from "./law-map";
 const LAW_API_OC = process.env.LAW_API_OC ?? "";
 const DATA_GO_KR_KEY = process.env.DATA_GO_KR_SERVICE_KEY ?? "";
 
-const TIMEOUT_MS = 5000;
+const TIMEOUT_MS = 15_000;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24시간
 
 /** 메모리 캐시 */
@@ -124,19 +124,26 @@ function extractArticles(
     const articleList: ParsedArticle[] = [];
     const articles = Array.isArray(articlesNode) ? articlesNode : [articlesNode];
 
-    // 필터 조문번호에서 "제N조" 부분만 추출
+    // 필터에서 "제N조" 또는 "제N조의M" 형태만 추출 (예: "제331조의2")
     const filterNumbers = articleFilters.map((f) => {
-      const match = f.match(/제[\d조의]+/);
+      const match = f.match(/제\d+조(의\d+)?/);
       return match ? match[0] : f;
     });
 
     for (const article of articles) {
-      const articleNum = article?.조문번호 || "";
-      const articleKey = typeof articleNum === "string" ? articleNum.trim() : `제${articleNum}조`;
+      // 편장절 제목("제25장 상해와 폭행의 죄" 등)은 제외
+      if (article?.조문여부 === "전문") continue;
 
-      const isMatch = filterNumbers.some(
-        (filter) => articleKey.includes(filter) || filter.includes(articleKey)
-      );
+      const articleNum = article?.조문번호;
+      const branchNum = article?.조문가지번호;
+      if (articleNum === undefined || articleNum === null || articleNum === "") continue;
+
+      const baseNum = String(articleNum).replace(/[^\d]/g, "");
+      const articleKey = branchNum
+        ? `제${baseNum}조의${String(branchNum).replace(/[^\d]/g, "")}`
+        : `제${baseNum}조`;
+
+      const isMatch = filterNumbers.includes(articleKey);
 
       if (!isMatch) continue;
 
@@ -205,8 +212,10 @@ export async function fetchLawsForIncident(
 
       const articles = extractArticles(xml, law.name, law.articles);
 
-      // 법령 단위 캐시
-      cache.set(lawCacheKey, { data: articles, expiry: Date.now() + CACHE_TTL_MS });
+      // 빈 결과는 일시 실패일 수 있으므로 캐시하지 않음
+      if (articles.length > 0) {
+        cache.set(lawCacheKey, { data: articles, expiry: Date.now() + CACHE_TTL_MS });
+      }
 
       return articles;
     })
@@ -216,8 +225,10 @@ export async function fetchLawsForIncident(
     r.status === "fulfilled" ? r.value : []
   );
 
-  // 신고 유형 단위 캐시
-  cache.set(cacheKey, { data: allArticles, expiry: Date.now() + CACHE_TTL_MS });
+  // 신고 유형 단위 캐시 (빈 결과는 캐시하지 않음)
+  if (allArticles.length > 0) {
+    cache.set(cacheKey, { data: allArticles, expiry: Date.now() + CACHE_TTL_MS });
+  }
 
   return allArticles;
 }
