@@ -44,6 +44,8 @@ export interface LawMapping {
   riskFlags: string[];
   evidence: string[];
   procedure: string[];
+  /** 자연어 신고 분류용 트리거어·동의어·정황어 (클라이언트 LLM이 incidentType을 추론할 때 사용) */
+  keywords: string[];
 }
 
 /** 법제처 API 파싱 결과 — 조문 단위 */

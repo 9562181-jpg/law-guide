@@ -50,6 +50,7 @@ export function registerLawTools(server: McpServer): void {
           incidentType: type,
           laws: mapping?.laws.map((l) => l.name) ?? [],
           documents: mapping?.documents ?? [],
+          keywords: mapping?.keywords ?? [],
         };
       });
       return {
@@ -68,21 +69,46 @@ export function registerLawTools(server: McpServer): void {
     {
       title: "신고 유형별 필수 법령 조회",
       description:
-        "특정 신고 유형에 필요한 모든 법령 조문을 법제처 Open API에서 실시간 조회한다. 할루시네이션 방지를 위해 반드시 이 도구로 원문을 확인한 후 법조를 인용하라.",
+        "특정 신고 유형(또는 복수 유형)에 필요한 모든 법령 조문을 법제처 Open API에서 실시간 조회한다. 자연어 신고 내용을 분류해 1~5개 incidentType을 배열로 전달하면 자동 병합 반환. 할루시네이션 방지를 위해 반드시 이 도구로 원문을 확인한 후 법조를 인용하라.",
       inputSchema: {
-        incidentType: IncidentTypeEnum,
+        incidentType: z
+          .union([
+            IncidentTypeEnum,
+            z.array(IncidentTypeEnum).min(1).max(5),
+          ])
+          .describe(
+            "신고유형 단일(string) 또는 복수(string[], 최대 5). 복수 시 법령 조문을 dedupe 후 자동 병합."
+          ),
         format: z.enum(["structured", "formatted"]).default("formatted"),
       },
     },
     async ({ incidentType, format }) => {
-      const articles = await fetchLawsForIncident(incidentType);
-      if (articles.length === 0) {
+      const types: IncidentType[] = Array.isArray(incidentType)
+        ? Array.from(new Set(incidentType))
+        : [incidentType];
+
+      const perType = await Promise.all(
+        types.map(async (t) => ({ type: t, articles: await fetchLawsForIncident(t) }))
+      );
+
+      const seen = new Set<string>();
+      const merged: ParsedArticle[] = [];
+      for (const { articles } of perType) {
+        for (const a of articles) {
+          const key = `${a.lawName}::${a.articleNumber}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          merged.push(a);
+        }
+      }
+
+      if (merged.length === 0) {
         return {
           content: [
             {
               type: "text",
               text:
-                `[법령 조회 실패 — ${incidentType}] ` +
+                `[법령 조회 실패 — ${types.join(", ")}] ` +
                 `search_articles_in_law(lawName, keyword) 또는 ` +
                 `get_law_article(lawName, articleNumber)로 직접 조회하라.`,
             },
@@ -90,10 +116,26 @@ export function registerLawTools(server: McpServer): void {
           isError: true,
         };
       }
-      const text =
-        format === "structured"
-          ? JSON.stringify({ incidentType, articles }, null, 2)
-          : formatLawContext(articles);
+
+      let text: string;
+      if (format === "structured") {
+        text = JSON.stringify(
+          {
+            incidentTypes: types,
+            articles: merged,
+          },
+          null,
+          2
+        );
+      } else if (types.length === 1) {
+        text = formatLawContext(merged);
+      } else {
+        const sections = perType
+          .filter((p) => p.articles.length > 0)
+          .map((p) => `# ${p.type}\n\n${formatLawContext(p.articles)}`);
+        text = sections.join("\n\n---\n\n");
+      }
+
       return { content: [{ type: "text", text }] };
     }
   );
